@@ -5,19 +5,6 @@
 
 ## Usage
 
-```
-$ npm i react-dinosaur-game -S
-```
-
-```
-import Game from 'react-dinosaur-game';
-
-...
-
-render() {
-    return <Game />;
-}
-```
 
 ## Document
 
