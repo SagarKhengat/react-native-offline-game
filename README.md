@@ -4,9 +4,10 @@
 ![demo](./demo.png)
 
 ## Usage
-
+Chrome like game for react native app
 
 ## Document
+
 
 ### props
 
