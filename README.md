@@ -16,22 +16,20 @@
   <img src="https://img.shields.io/badge/Expo-ready-000020?logo=expo" alt="Works with Expo" />
   <img src="https://img.shields.io/badge/size-6%20kB%20gzipped-2ea44f" alt="6 kB gzipped" />
   <img src="https://img.shields.io/badge/types-TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/npm/l/react-native-offline-game?color=blue" alt="MIT license" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" />
 </p>
 
 ---
 
 ## ✨ Why you'll like it
 
-|  |  |
-| --- | --- |
-| 🔌 **One line to add** | Drop `<OfflineGame />` into your app. It watches the connection for you. |
-| 🧘 **Never flickers** | Waits a moment and double-checks before it appears, and ignores quick blips while you're reconnecting. |
-| 🎮 **Plays like the real thing** | Tap to jump. The ground speeds up as you go, and the score blinks every 100 points. |
-| 🔊 **Retro beeps** | Optional jump, crash and milestone sounds, made in code. No audio files. |
-| 📴 **Works truly offline** | Everything it draws is built in. Nothing to download, even in a dev build in airplane mode. |
-| 🌗 **Light and dark** | Follows the phone's theme automatically. |
-| 🪶 **Tiny** | About **6 kB** gzipped in your app, artwork included. |
+- 🔌 **One line to add.** Drop `<OfflineGame />` into your app. It watches the connection for you.
+- 🧘 **Never flickers.** It waits a moment and double-checks before it appears, and ignores quick blips while you're reconnecting.
+- 🎮 **Plays like the real thing.** Tap to jump. The ground speeds up as you go, and the score blinks every 100 points.
+- 🔊 **Retro beeps.** Optional jump, crash and milestone sounds, made in code. No audio files.
+- 📴 **Works truly offline.** Everything it draws is built in. Nothing to download, even in a dev build in airplane mode.
+- 🌗 **Light and dark.** Follows the phone's theme automatically.
+- 🪶 **Tiny.** About **6 kB** gzipped in your app, artwork included.
 
 <p align="center">
   <img src="docs/screens.png" alt="The No internet page in light and dark mode" width="640" />
@@ -78,12 +76,13 @@ export default function App() {
 ## 🎬 What your users see
 
 ```text
- connection drops                    connection comes back
-        │                                      │
-        ▼                                      ▼
-  ┄┄┄ waits 1.5 s ┄┄┄► double-checks ─► 🦖 page fades in ┄┄ waits 1 s ┄┄► page fades out
-        │                                      │
-        └─ back already? nothing appears       └─ dropped again? the game keeps going
+Connection drops
+  ├─ wait 1.5 s ─► double-check ─► the dino page fades in
+  └─ back before that? nothing appears
+
+Connection comes back
+  ├─ wait 1 s ─► the page fades out
+  └─ drops again before that? keep playing
 ```
 
 - A full-screen **"No internet"** page fades in over your app with the game ready to play.
