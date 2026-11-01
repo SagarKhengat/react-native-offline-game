@@ -17,11 +17,11 @@ top of your app. When the connection comes back, it closes by itself.
 - Retro beeps on jumps, crashes and every 100 points, synthesised at run
   time (no audio files). Optional: needs `react-native-audio-api`.
 - Plain React Native views and images, no canvas or WebView. The sprites are
-  one 980-byte image embedded in the code, so the game draws even when
+  one image under 1 kB, embedded in the code, so the game draws even when
   nothing can be loaded, including a development build that can't reach
   Metro. Works in Expo Go and bare apps on iOS and Android.
-- Small: 18 kB to download from npm, about 6 kB (12 kB minified) added to
-  your app's JavaScript.
+- Small: 19 kB to download from npm, about 6 kB gzipped (13 kB minified)
+  added to your app's JavaScript.
 - Light and dark themes, follows the device setting. (In Expo, set
   `"userInterfaceStyle": "automatic"` in `app.json`, or the app always
   reports light mode.)
