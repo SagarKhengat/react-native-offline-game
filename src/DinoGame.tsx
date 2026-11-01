@@ -376,6 +376,9 @@ function Sprite({
           2.75x), which shifts the sheet and shows a sliver of the next
           sprite. */}
       <Image
+        // iOS doesn't re-tint an image that has already loaded, so a theme
+        // change (light to dark while the game is open) remounts it.
+        key={tint ?? 'original'}
         source={SHEET}
         resizeMode="stretch"
         fadeDuration={0}
