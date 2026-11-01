@@ -26,12 +26,15 @@ const SPRITES = [
   ['cloud', 'cloud', 262, 4, 46, 13],
 ];
 
-// The ground goes along the top, everything else in a row underneath.
+// The ground goes along the top, everything else in a row underneath, with
+// transparent gaps so scaling a sprite on screen never blends in the edge of
+// its neighbour.
+const GAP = 2;
 const placed = [];
 let x = 0;
 for (const [name, file, sx, sy, w, h] of SPRITES) {
-  const [dx, dy] = name === 'ground' ? [0, 0] : [x, 9];
-  if (name !== 'ground') x += w;
+  const [dx, dy] = name === 'ground' ? [0, 0] : [x, 9 + GAP];
+  if (name !== 'ground') x += w + GAP;
   placed.push({ name, file, sx, sy, w, h, dx, dy });
 }
 const width = Math.max(...placed.map((p) => p.dx + p.w));

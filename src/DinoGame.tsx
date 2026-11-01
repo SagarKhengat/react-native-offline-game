@@ -371,8 +371,13 @@ function Sprite({
   const { x, y, width, height } = FRAMES[frame];
   return (
     <View style={[styles.sprite, { left, top, width, height }]}>
+      {/* stretch, not the default cover: cover centre-crops when the box's
+          rounded pixel size doesn't match the image exactly (Android at
+          2.75x), which shifts the sheet and shows a sliver of the next
+          sprite. */}
       <Image
         source={SHEET}
+        resizeMode="stretch"
         fadeDuration={0}
         style={[
           styles.sheet,
