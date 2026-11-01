@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  jest,
+} from '@jest/globals';
 
 type Call = [string, ...unknown[]];
 let mockCalls: Call[];
@@ -54,6 +61,21 @@ describe('sounds', () => {
   beforeEach(() => {
     mockCalls = [];
     jest.resetModules();
+    // What react-native-audio-api's native code installs.
+    Object.assign(globalThis, { createAudioContext: () => {} });
+  });
+
+  afterEach(() => {
+    delete (globalThis as { createAudioContext?: unknown }).createAudioContext;
+  });
+
+  it('does not import the library when its native code is missing', () => {
+    delete (globalThis as { createAudioContext?: unknown }).createAudioContext;
+    const { playSound, retainSounds } = require('../sounds');
+    const release = retainSounds();
+    playSound('jump');
+    release();
+    expect(mockCalls).toEqual([]);
   });
 
   it('synthesises square-wave beeps on an ambient audio session', () => {

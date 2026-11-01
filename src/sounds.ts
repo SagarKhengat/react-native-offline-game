@@ -3,6 +3,7 @@
  * no audio files. The library is optional: when the app doesn't have it (or
  * runs in Expo Go, which lacks its native code) the game is simply silent.
  */
+import { TurboModuleRegistry } from 'react-native';
 import type { GameSound } from './engine';
 
 // [frequency in Hz, length in seconds] of each note, played back to back on
@@ -51,11 +52,14 @@ function audioContext(): Context | null {
     return context;
   }
   context = null;
+  if (!hasNativeAudio()) {
+    return null;
+  }
   let audio;
   try {
     audio = require('react-native-audio-api');
   } catch {
-    // Not installed, or no native code (Expo Go): stay silent.
+    // Not installed: stay silent.
     return null;
   }
   try {
@@ -69,6 +73,22 @@ function audioContext(): Context | null {
     warn('could not start react-native-audio-api', error);
   }
   return context;
+}
+
+/**
+ * Whether react-native-audio-api's native code is in this build. Importing
+ * the library without it (an Expo Go app, say) throws during import, which
+ * shows a full-screen error in development, so check first.
+ */
+function hasNativeAudio(): boolean {
+  try {
+    return (
+      'createAudioContext' in globalThis ||
+      TurboModuleRegistry.get('AudioAPIModule') != null
+    );
+  } catch {
+    return false;
+  }
 }
 
 function warn(message: string, error: unknown) {
