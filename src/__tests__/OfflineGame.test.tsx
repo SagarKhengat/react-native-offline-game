@@ -235,7 +235,10 @@ describe('OfflineGame', () => {
         consoleError(...args);
       }
     });
-    const view = await render(<OfflineGame {...DELAYS} isOffline />);
+    const onSound = jest.fn();
+    const view = await render(
+      <OfflineGame {...DELAYS} isOffline onSound={onSound} />
+    );
     await waitFor(() => expect(isShown()).toBe(true));
     const game = screen.getByLabelText('Dinosaur game');
     await act(() =>
@@ -245,12 +248,14 @@ describe('OfflineGame', () => {
     );
     expect(screen.getByText('Tap to play')).toBeTruthy();
 
-    await act(() => fireEvent(game, 'pressIn'));
+    // A tap anywhere on the page plays, not just on the game strip.
+    await act(() => fireEvent(screen.getByText('No internet'), 'touchStart'));
     expect(screen.queryByText('Tap to play')).toBeNull();
-    await wait(500);
-    // About 30 points a second. The matcher collapses the double space.
+    expect(onSound).toHaveBeenCalledWith('jump');
+    await wait(1000);
+    // The matcher collapses the double space.
     expect(screen.getByText(/^HI \d{5} \d{5}$/)).toBeTruthy();
-    expect(screen.queryByText(/ 0000[0-5]$/)).toBeNull();
+    expect(screen.queryByText(/ 00000$/)).toBeNull();
     await view.unmount();
     jest.mocked(console.error).mockRestore();
   });

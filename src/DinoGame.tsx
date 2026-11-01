@@ -11,48 +11,42 @@ import {
   AppState,
   Image,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
+  View,
   useColorScheme,
-  type ImageSourcePropType,
   type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import {
-  GROUND_TILE_HEIGHT,
   GROUND_TILE_WIDTH,
   GROUND_Y,
-  OBSTACLE_HEIGHT,
   OBSTACLE_WIDTH,
   OBSTACLE_Y,
-  PLAYER_HEIGHT,
-  PLAYER_WIDTH,
   PLAYER_X,
   PLAYER_Y,
   SCENE_HEIGHT,
-  SKY_TILE_HEIGHT,
-  SKY_TILE_WIDTH,
-  SKY_Y,
   createGame,
   obstacleX,
   pause,
   playerPose,
+  seedClouds,
+  shownScore,
   step,
   tap,
+  type GameSound,
   type GameStatus,
   type PlayerPose,
 } from './engine';
+import { playSound, retainSounds } from './sounds';
+import { FRAMES, SHEET, type FrameName } from './sprites';
 
-const skyImage = require('./assets/cloud.png');
-const groundImage = require('./assets/ground.png');
-const obstacleImage = require('./assets/obstacle.png');
-const playerImages: Record<PlayerPose, ImageSourcePropType> = {
-  stand: require('./assets/dino.png'),
-  left: require('./assets/dino-left.png'),
-  right: require('./assets/dino-right.png'),
-  dead: require('./assets/dino-dead.png'),
+const POSE_FRAMES: Record<PlayerPose, FrameName> = {
+  stand: 'dino',
+  left: 'dinoLeft',
+  right: 'dinoRight',
+  dead: 'dinoDead',
 };
 
 // Longest step simulated in one frame, so a stalled JS thread slows the game
@@ -60,6 +54,9 @@ const playerImages: Record<PlayerPose, ImageSourcePropType> = {
 const MAX_STEP = 1 / 20;
 // Taps this soon after a crash are ignored so a late jump doesn't restart.
 const RESTART_DELAY_MS = 400;
+// Hurdles mount this far off screen so their image is ready when they
+// scroll in.
+const PRELOAD_DISTANCE = 60;
 
 export const COLORS = {
   light: {
@@ -83,7 +80,11 @@ export type DinoGameOptions = {
   fps?: number;
   /** Cloud speed in points per second. Default 40. */
   skySpeed?: number;
-  /** Starting ground speed in points per second. Default 100. */
+  /**
+   * Starting ground speed in points per second, default 360. It rises over
+   * time to 780, and games narrower than 600 points run proportionally
+   * slower, like Chrome's game on phones.
+   */
   groundSpeed?: number;
 };
 
@@ -95,6 +96,17 @@ export type DinoGameProps = {
   onGameOver?: (score: number) => void;
   /** Called with the new best score when a run beats it. */
   onHighScoreChange?: (highScore: number) => void;
+  /**
+   * Beeps on jumps, crashes and every 100 points. They need
+   * react-native-audio-api in the app; without it the game is silent.
+   * Default true.
+   */
+  sounds?: boolean;
+  /**
+   * Called at each of those moments whether or not sounds are on, for
+   * playing your own audio or haptics.
+   */
+  onSound?: (sound: GameSound) => void;
   /** Default 'auto', which follows the device setting. */
   colorScheme?: ColorSchemeName;
   style?: StyleProp<ViewStyle>;
@@ -106,7 +118,7 @@ export type DinoGameHandle = {
   pause: () => void;
 };
 
-const DEFAULT_OPTIONS = { fps: 60, skySpeed: 40, groundSpeed: 100 };
+const DEFAULT_OPTIONS = { fps: 60, skySpeed: 40, groundSpeed: 360 };
 
 export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
   function DinoGame(
@@ -115,6 +127,8 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       highScore = 0,
       onGameOver,
       onHighScoreChange,
+      sounds = true,
+      onSound,
       colorScheme = 'auto',
       style,
     },
@@ -129,9 +143,15 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
     const overAtRef = useRef(0);
     const reportedHighScoreRef = useRef(Math.floor(highScore));
 
-    const latest = useRef({ options, onGameOver, onHighScoreChange });
+    const latest = useRef({
+      options,
+      onGameOver,
+      onHighScoreChange,
+      sounds,
+      onSound,
+    });
     useEffect(() => {
-      latest.current = { options, onGameOver, onHighScoreChange };
+      latest.current = { options, onGameOver, onHighScoreChange, sounds, onSound };
     });
 
     const gameOptions = useCallback((): Required<DinoGameOptions> => {
@@ -142,6 +162,17 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
         groundSpeed: groundSpeed ?? DEFAULT_OPTIONS.groundSpeed,
       };
     }, []);
+
+    const emit = useCallback((sound: GameSound | undefined) => {
+      if (sound) {
+        latest.current.onSound?.(sound);
+        if (latest.current.sounds) {
+          playSound(sound);
+        }
+      }
+    }, []);
+
+    useEffect(() => (sounds ? retainSounds() : undefined), [sounds]);
 
     const reportHighScore = useCallback(() => {
       const best = Math.floor(gameRef.current.highScore);
@@ -162,13 +193,16 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
 
     const handleTap = useCallback(() => {
       const g = gameRef.current;
-      if (g.status === 'over' && Date.now() - overAtRef.current < RESTART_DELAY_MS) {
+      if (
+        g.status === 'over' &&
+        Date.now() - overAtRef.current < RESTART_DELAY_MS
+      ) {
         return;
       }
-      tap(g, gameOptions());
+      emit(tap(g, gameOptions()));
       setStatus(g.status);
       redraw();
-    }, [gameOptions]);
+    }, [emit, gameOptions]);
 
     const handlePause = useCallback(() => {
       pause(gameRef.current);
@@ -203,7 +237,9 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
         if (last === undefined || elapsed >= 1000 / opts.fps - 1) {
           last = now;
           const g = gameRef.current;
-          step(g, Math.min(elapsed / 1000, MAX_STEP), widthRef.current, opts);
+          emit(
+            step(g, Math.min(elapsed / 1000, MAX_STEP), widthRef.current, opts)
+          );
           redraw();
           if (g.status !== 'running') {
             if (g.status === 'over') {
@@ -219,11 +255,13 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       };
       frame = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(frame);
-    }, [status, gameOptions, reportHighScore]);
+    }, [status, emit, gameOptions, reportHighScore]);
 
     const onLayout = useCallback((event: LayoutChangeEvent) => {
-      widthRef.current = event.nativeEvent.layout.width;
-      setWidth(event.nativeEvent.layout.width);
+      const layoutWidth = event.nativeEvent.layout.width;
+      widthRef.current = layoutWidth;
+      seedClouds(gameRef.current, layoutWidth);
+      setWidth(layoutWidth);
     }, []);
 
     const systemScheme = useColorScheme();
@@ -235,19 +273,24 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
         : colorScheme;
     const colors = COLORS[scheme];
 
-    const score = Math.floor(game.score);
+    const shown = shownScore(game);
     const best = Math.floor(game.highScore);
     const scoreText =
       (best > 0 ? `HI ${pad(best)}  ` : '') +
-      (status === 'idle' ? '' : pad(score));
+      (status === 'idle' ? '' : shown === null ? '     ' : pad(shown));
 
     return (
-      <Pressable
-        onPressIn={handleTap}
+      // onTouchStart rather than Pressable: it fires the moment a finger lands
+      // and for every finger, so quick taps with two thumbs all count.
+      <View
+        onTouchStart={handleTap}
         onLayout={onLayout}
+        accessible
         accessibilityRole="button"
         accessibilityLabel="Dinosaur game"
         accessibilityHint={status === 'running' ? 'Jumps' : 'Starts the game'}
+        accessibilityActions={[{ name: 'activate' }]}
+        onAccessibilityAction={handleTap}
         style={[
           styles.container,
           { backgroundColor: colors.background },
@@ -256,75 +299,43 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       >
         {width > 0 && (
           <>
-            {tileOffsets(width, SKY_TILE_WIDTH, game.skyOffset).map((x, i) => (
-              <Image
-                key={`sky${i}`}
-                source={skyImage}
-                fadeDuration={0}
-                style={[
-                  styles.sprite,
-                  {
-                    left: x,
-                    top: SKY_Y,
-                    width: SKY_TILE_WIDTH,
-                    height: SKY_TILE_HEIGHT,
-                    tintColor: colors.cloud,
-                  },
-                ]}
+            {game.clouds.map((cloud, i) => (
+              <Sprite
+                key={`cloud${i}`}
+                frame="cloud"
+                left={cloud.x}
+                top={cloud.y}
+                tint={colors.cloud}
               />
             ))}
             {tileOffsets(width, GROUND_TILE_WIDTH, game.groundOffset).map(
               (x, i) => (
-                <Image
+                <Sprite
                   key={`ground${i}`}
-                  source={groundImage}
-                  fadeDuration={0}
-                  style={[
-                    styles.sprite,
-                    {
-                      left: x,
-                      top: GROUND_Y,
-                      width: GROUND_TILE_WIDTH,
-                      height: GROUND_TILE_HEIGHT,
-                      tintColor: colors.sprite,
-                    },
-                  ]}
+                  frame="ground"
+                  left={x}
+                  top={GROUND_Y}
+                  tint={colors.sprite}
                 />
               )
             )}
             {game.obstacles.map((obstacle) => {
               const x = obstacleX(game, obstacle, width);
-              return x < width && x + OBSTACLE_WIDTH > 0 ? (
-                <Image
+              return x < width + PRELOAD_DISTANCE && x + OBSTACLE_WIDTH > 0 ? (
+                <Sprite
                   key={obstacle}
-                  source={obstacleImage}
-                  fadeDuration={0}
-                  style={[
-                    styles.sprite,
-                    {
-                      left: x,
-                      top: OBSTACLE_Y,
-                      width: OBSTACLE_WIDTH,
-                      height: OBSTACLE_HEIGHT,
-                      tintColor: colors.sprite,
-                    },
-                  ]}
+                  frame="obstacle"
+                  left={x}
+                  top={OBSTACLE_Y}
+                  tint={colors.sprite}
                 />
               ) : null;
             })}
-            <Image
-              source={playerImages[playerPose(game)]}
-              fadeDuration={0}
-              style={[
-                styles.sprite,
-                {
-                  left: PLAYER_X,
-                  top: PLAYER_Y - game.jumpHeight,
-                  width: PLAYER_WIDTH,
-                  height: PLAYER_HEIGHT,
-                  tintColor: colors.sprite,
-                },
-              ]}
+            <Sprite
+              frame={POSE_FRAMES[playerPose(game)]}
+              left={PLAYER_X}
+              top={PLAYER_Y - game.jumpHeight}
+              tint={colors.sprite}
             />
             <Text style={[styles.score, { color: colors.text }]}>
               {scoreText}
@@ -336,10 +347,41 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
             )}
           </>
         )}
-      </Pressable>
+      </View>
     );
   }
 );
+
+/**
+ * One sprite: a window the sprite's size onto the whole sheet, shifted so
+ * the right part shows. Every sprite shares the one sheet image, so changing
+ * a pose only moves it and never loads anything.
+ */
+function Sprite({
+  frame,
+  left,
+  top,
+  tint,
+}: {
+  frame: FrameName;
+  left: number;
+  top: number;
+  tint: string | undefined;
+}) {
+  const { x, y, width, height } = FRAMES[frame];
+  return (
+    <View style={[styles.sprite, { left, top, width, height }]}>
+      <Image
+        source={SHEET}
+        fadeDuration={0}
+        style={[
+          styles.sheet,
+          { left: -x, top: -y, tintColor: tint },
+        ]}
+      />
+    </View>
+  );
+}
 
 const MESSAGES: Record<Exclude<GameStatus, 'running'>, string> = {
   idle: 'Tap to play',
@@ -374,6 +416,12 @@ const styles = StyleSheet.create({
   },
   sprite: {
     position: 'absolute',
+    overflow: 'hidden',
+  },
+  sheet: {
+    position: 'absolute',
+    width: SHEET.width,
+    height: SHEET.height,
   },
   score: {
     position: 'absolute',

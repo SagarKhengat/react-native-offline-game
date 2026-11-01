@@ -7,4 +7,5 @@ export type {
   DinoGameOptions,
   DinoGameProps,
 } from './DinoGame';
+export type { GameSound } from './engine';
 export { useIsOffline } from './useIsOffline';

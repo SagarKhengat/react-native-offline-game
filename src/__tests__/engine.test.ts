@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   AIR_TIME,
+  MAX_SPEED,
   OBSTACLE_WIDTH,
   PLAYER_X,
   createGame,
@@ -8,13 +9,15 @@ import {
   obstacleX,
   pause,
   playerPose,
+  seedClouds,
+  shownScore,
   step,
   tap,
   type GameOptions,
   type GameState,
 } from '../engine';
 
-const OPTIONS: GameOptions = { skySpeed: 40, groundSpeed: 100 };
+const OPTIONS: GameOptions = { skySpeed: 40, groundSpeed: 360 };
 const WIDTH = 390;
 const FRAME = 1 / 60;
 
@@ -33,20 +36,21 @@ function run(
   options = OPTIONS,
   dt = FRAME,
   random = seeded(1),
-  beforeStep?: () => void
+  beforeStep?: () => void,
+  width = WIDTH
 ) {
   for (let t = 0; t < seconds && game.status === 'running'; t += dt) {
     beforeStep?.();
-    step(game, dt, WIDTH, options, random);
+    step(game, dt, width, options, random);
   }
 }
 
 /** Jumps when the next hurdle is about to reach the dinosaur. */
-function autoJump(game: GameState, options: GameOptions) {
+function autoJump(game: GameState, options: GameOptions, width = WIDTH) {
   return () => {
-    const speed = currentSpeed(game, options);
+    const speed = currentSpeed(game, width);
     const next = game.obstacles
-      .map((o) => obstacleX(game, o, WIDTH))
+      .map((o) => obstacleX(game, o, width))
       .find((x) => x + OBSTACLE_WIDTH > PLAYER_X + 10);
     if (next !== undefined && next - (PLAYER_X + 34) <= speed * 0.15) {
       tap(game, options);
@@ -63,7 +67,16 @@ describe('engine', () => {
     expect(game.jumpHeight).toBeGreaterThan(0);
   });
 
-  it('jumps about 55 points high and lands after AIR_TIME', () => {
+  it('still jumps when the first frame after the tap has no elapsed time', () => {
+    // The game loop's first frame always steps by 0.
+    const game = createGame();
+    tap(game, OPTIONS);
+    step(game, 0, WIDTH, OPTIONS);
+    run(game, 0.15);
+    expect(game.jumpHeight).toBeGreaterThan(40);
+  });
+
+  it('jumps about 62 points high and lands after AIR_TIME', () => {
     const game = createGame();
     tap(game, OPTIONS);
     let peak = 0;
@@ -76,8 +89,8 @@ describe('engine', () => {
         break;
       }
     }
-    expect(peak).toBeGreaterThan(53);
-    expect(peak).toBeLessThanOrEqual(55);
+    expect(peak).toBeGreaterThan(60);
+    expect(peak).toBeLessThanOrEqual(62);
     expect(landedAt).toBeCloseTo(AIR_TIME, 1);
   });
 
@@ -103,27 +116,50 @@ describe('engine', () => {
   });
 
   it.each([
-    ['default speed, 60 fps', 100, FRAME],
-    ['fast ground, 60 fps', 300, FRAME],
-    ['default speed, slow device', 100, 1 / 20],
-    ['fast ground, slow device', 300, 1 / 20],
-  ])('always leaves room to clear every hurdle (%s)', (_, groundSpeed, dt) => {
-    const options = { ...OPTIONS, groundSpeed };
-    for (let seed = 1; seed <= 5; seed++) {
-      const game = createGame();
-      tap(game, options);
-      run(game, 180, options, dt, seeded(seed), autoJump(game, options));
-      expect(game.status).toBe('running');
-      expect(game.obstacles.length).toBeLessThan(10);
+    ['phone, 60 fps', 390, 360, FRAME],
+    ['phone, slow device', 390, 360, 1 / 20],
+    ['phone, top speed from the start', 390, MAX_SPEED, FRAME],
+    ['tablet, 60 fps', 1024, 360, FRAME],
+    ['tablet, top speed, slow device', 1024, MAX_SPEED, 1 / 20],
+  ])(
+    'always leaves room to clear every hurdle (%s)',
+    (_, width, groundSpeed, dt) => {
+      const options = { ...OPTIONS, groundSpeed };
+      for (let seed = 1; seed <= 5; seed++) {
+        const game = createGame();
+        tap(game, options);
+        run(
+          game,
+          180,
+          options,
+          dt,
+          seeded(seed),
+          autoJump(game, options, width),
+          width
+        );
+        expect(game.status).toBe('running');
+        expect(game.obstacles.length).toBeLessThan(10);
+      }
     }
-  });
+  );
 
-  it('speeds up as the score grows', () => {
+  it('speeds up over time to MAX_SPEED', () => {
     const game = createGame();
     tap(game, OPTIONS);
-    const start = currentSpeed(game, OPTIONS);
-    run(game, 60, OPTIONS, FRAME, seeded(2), autoJump(game, OPTIONS));
-    expect(currentSpeed(game, OPTIONS)).toBeGreaterThan(start);
+    const start = currentSpeed(game, 1024);
+    expect(start).toBe(360);
+    run(game, 30, OPTIONS, FRAME, seeded(2), autoJump(game, OPTIONS));
+    expect(currentSpeed(game, 1024)).toBeGreaterThan(start + 90);
+    run(game, 150, OPTIONS, FRAME, seeded(2), autoJump(game, OPTIONS));
+    expect(game.status).toBe('running');
+    expect(currentSpeed(game, 1024)).toBe(MAX_SPEED);
+  });
+
+  it('runs slower on narrow screens, like Chrome on phones', () => {
+    const game = createGame();
+    tap(game, OPTIONS);
+    expect(currentSpeed(game, 600)).toBe(360);
+    expect(currentSpeed(game, 390)).toBeCloseTo(360 * (390 / 600) * 1.2);
   });
 
   it('freezes while paused and resumes on tap', () => {
@@ -141,11 +177,11 @@ describe('engine', () => {
   });
 
   it('keeps the high score when restarting after a crash', () => {
-    const game = createGame(50);
+    const game = createGame(10);
     tap(game, OPTIONS);
     run(game, 30);
     const best = game.highScore;
-    expect(best).toBeGreaterThan(50);
+    expect(best).toBeGreaterThan(10);
     tap(game, OPTIONS);
     expect(game.status).toBe('running');
     expect(game.score).toBe(0);
@@ -163,5 +199,65 @@ describe('engine', () => {
       poses.add(playerPose(game));
     }
     expect([...poses].sort()).toEqual(['left', 'right']);
+  });
+
+  it('reports a jump only when the dinosaur takes off', () => {
+    const game = createGame();
+    expect(tap(game, OPTIONS)).toBe('jump');
+    run(game, 0.2);
+    expect(tap(game, OPTIONS)).toBeUndefined();
+    run(game, AIR_TIME);
+    expect(tap(game, OPTIONS)).toBe('jump');
+  });
+
+  it('reports a hit when the dinosaur crashes', () => {
+    const game = createGame();
+    tap(game, OPTIONS);
+    const sounds: (string | undefined)[] = [];
+    for (let i = 0; i < 60 * 30 && game.status === 'running'; i++) {
+      sounds.push(step(game, FRAME, WIDTH, OPTIONS));
+    }
+    expect(game.status).toBe('over');
+    expect(sounds[sounds.length - 1]).toBe('hit');
+  });
+
+  it('beeps and blinks the score at every 100 points, like Chrome', () => {
+    const game = createGame();
+    const options = { ...OPTIONS };
+    tap(game, options);
+    const jumper = autoJump(game, options);
+    const milestones: number[] = [];
+    for (let i = 0; i < 60 * 60 && milestones.length < 2; i++) {
+      jumper();
+      if (step(game, FRAME, WIDTH, options, seeded(3)) === 'score') {
+        milestones.push(Math.floor(game.score));
+      }
+    }
+    expect(milestones).toEqual([100, 200]);
+
+    // Off, on, off... showing the milestone, then back to the live score.
+    expect(shownScore(game)).toBeNull();
+    step(game, 0.13, WIDTH, options);
+    expect(shownScore(game)).toBe(200);
+    step(game, 0.13, WIDTH, options);
+    expect(shownScore(game)).toBeNull();
+    for (let i = 0; i < 4; i++) step(game, 0.13, WIDTH, options);
+    expect(shownScore(game)).toBe(Math.floor(game.score));
+  });
+
+  it('scatters clouds across the sky and keeps them coming', () => {
+    const game = createGame();
+    seedClouds(game, WIDTH, seeded(4));
+    expect(game.clouds.length).toBeGreaterThan(0);
+    expect(game.clouds.every((c) => c.x < WIDTH)).toBe(true);
+    const count = game.clouds.length;
+    seedClouds(game, WIDTH, seeded(5));
+    expect(game.clouds.length).toBe(count);
+
+    tap(game, OPTIONS);
+    run(game, 60, OPTIONS, FRAME, seeded(6), autoJump(game, OPTIONS));
+    expect(game.clouds.length).toBeGreaterThan(0);
+    expect(game.clouds.length).toBeLessThan(10);
+    expect(game.clouds.some((c) => c.x < WIDTH)).toBe(true);
   });
 });

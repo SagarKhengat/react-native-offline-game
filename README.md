@@ -12,8 +12,16 @@ top of your app. When the connection comes back, it closes by itself.
   [`@react-native-community/netinfo`](https://github.com/react-native-netinfo/react-native-netinfo).
 - Buffered detection: brief drops, network switches and flaky reconnects
   don't make the screen flash open and closed.
-- Plain React Native views and images, no canvas or WebView. Works in Expo Go
-  and bare apps on iOS and Android.
+- Plays like Chrome's game: tap anywhere to jump, the ground speeds up over
+  time, and narrow phone screens run a little slower, as Chrome does.
+- Retro beeps on jumps, crashes and every 100 points, synthesised at run
+  time (no audio files). Optional: needs `react-native-audio-api`.
+- Plain React Native views and images, no canvas or WebView. The sprites are
+  one 980-byte image embedded in the code, so the game draws even when
+  nothing can be loaded, including a development build that can't reach
+  Metro. Works in Expo Go and bare apps on iOS and Android.
+- Small: 18 kB to download from npm, about 6 kB (12 kB minified) added to
+  your app's JavaScript.
 - Light and dark themes, follows the device setting. (In Expo, set
   `"userInterfaceStyle": "automatic"` in `app.json`, or the app always
   reports light mode.)
@@ -33,6 +41,29 @@ npx expo install react-native-offline-game @react-native-community/netinfo
 
 For a bare React Native app, run `npx pod-install` afterwards so iOS links
 NetInfo.
+
+### Sound effects (optional)
+
+The game beeps on jumps, crashes and every 100 points when
+[`react-native-audio-api`](https://github.com/software-mansion/react-native-audio-api)
+is installed. Without it the game is silent; nothing else changes.
+
+```sh
+npx expo install react-native-audio-api react-native-worklets
+```
+
+It's a native module, so it needs a development build, not Expo Go. In a bare
+app, install both packages with npm and run `npx pod-install`. The beeps use
+the ambient audio session on iOS, so they respect the silent switch and play
+over the user's music instead of stopping it.
+
+To use something else, such as `expo-audio` with your own files or haptics,
+turn the built-in beeps off and play your own from `onSound`:
+
+```tsx
+<OfflineGame sounds={false} onSound={(sound) => play(sound)} />
+// sound is 'jump' | 'hit' | 'score'
+```
 
 ## Usage
 
@@ -97,6 +128,11 @@ import NetInfo from '@react-native-community/netinfo';
 NetInfo.configure({ reachabilityUrl: 'https://example.com/health' });
 ```
 
+Call `NetInfo.configure()` before `OfflineGame` first renders, for example
+in your entry file. Calling it later replaces NetInfo's internal state, and
+components that were already listening (this one included) stop getting
+updates.
+
 To use your own logic instead, pass `isOffline`. NetInfo is then ignored and
 only the two delays apply:
 
@@ -121,14 +157,16 @@ only the two delays apply:
 | `highScore` | `number` | `0` | High score to show at the start. |
 | `onHighScoreChange` | `(highScore: number) => void` | | Called when a run beats the high score. |
 | `onGameOver` | `(score: number) => void` | | Called when the dinosaur hits a hurdle. |
+| `sounds` | `boolean` | `true` | Beeps on jumps, crashes and every 100 points, when `react-native-audio-api` is installed. |
+| `onSound` | `(sound: 'jump' \| 'hit' \| 'score') => void` | | Called at each of those moments, sounds on or off. |
 | `colorScheme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | Theme. `'auto'` follows the device. |
-| `options` | `{ fps?, skySpeed?, groundSpeed? }` | `{ fps: 60, skySpeed: 40, groundSpeed: 100 }` | Frame rate cap and speeds in points per second. |
+| `options` | `{ fps?, skySpeed?, groundSpeed? }` | `{ fps: 60, skySpeed: 40, groundSpeed: 360 }` | Frame rate cap, cloud speed, and starting ground speed in points per second. |
 
 ### `DinoGame`
 
 The game strip on its own, 120 points tall and as wide as its container. It
-takes `options`, `highScore`, `onHighScoreChange`, `onGameOver`, `colorScheme`
-and `style`. Tap it to start, jump and restart. A ref gives you `tap()` and
+takes `options`, `highScore`, `onHighScoreChange`, `onGameOver`, `sounds`,
+`onSound`, `colorScheme` and `style`. Tap it to start, jump and restart. A ref gives you `tap()` and
 `pause()`. The game pauses by itself when the app goes to the background.
 
 ```tsx

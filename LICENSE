@@ -24,7 +24,7 @@ SOFTWARE.
 
 Third-party notices
 
-The first version of this package and its sprite images (src/assets) came from
+The first version of this package and its sprite images (assets/) came from
 react-dinosaur-game (https://github.com/LzxHahaha/react-dinosaur-game):
 
   ISC License

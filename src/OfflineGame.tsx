@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
-  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -119,19 +118,22 @@ export function OfflineGame({
       <StatusBar
         barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'}
       />
-      <Pressable
-        onPressIn={() => gameRef.current?.tap()}
-        accessible={false}
+      {/* The whole page is the tap area. The game strip passes its touches
+          up here so each tap reaches the game exactly once. */}
+      <View
+        onTouchStart={() => gameRef.current?.tap()}
         style={[styles.screen, { backgroundColor: colors.background }]}
       >
         <View style={styles.content}>
-          <DinoGame
-            ref={gameRef}
-            highScore={highScore}
-            onHighScoreChange={handleHighScoreChange}
-            colorScheme={scheme}
-            {...gameProps}
-          />
+          <View style={styles.passTouches}>
+            <DinoGame
+              ref={gameRef}
+              highScore={highScore}
+              onHighScoreChange={handleHighScoreChange}
+              colorScheme={scheme}
+              {...gameProps}
+            />
+          </View>
           <Text
             accessibilityRole="header"
             style={[styles.title, { color: colors.text }]}
@@ -142,7 +144,7 @@ export function OfflineGame({
             {message}
           </Text>
         </View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -151,6 +153,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     justifyContent: 'center',
+  },
+  passTouches: {
+    pointerEvents: 'none',
   },
   content: {
     width: '100%',
