@@ -24,6 +24,12 @@ const SPRITES = [
   ['dinoDead', 'dino-dead', 0, 0, 40, 44],
   ['obstacle', 'obstacle', 0, 0, 25, 23],
   ['cloud', 'cloud', 262, 4, 46, 13],
+  // From Chromium's sprite sheet, with their opaque white backgrounds and
+  // eyes made transparent like the sprites above.
+  ['bird1', 'bird-1', 0, 0, 46, 40],
+  ['bird2', 'bird-2', 0, 0, 46, 40],
+  ['dinoDuck1', 'dino-duck-1', 0, 0, 59, 30],
+  ['dinoDuck2', 'dino-duck-2', 0, 0, 59, 30],
 ];
 
 // The ground goes along the top, everything else in a row underneath, with

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/demo.gif" alt="The dinosaur running and jumping over hurdles" width="600" />
+  <img src="docs/demo.gif" alt="The dinosaur jumping hurdles and ducking under pterodactyls" width="600" />
 </p>
 
 <h1 align="center">🦖 react-native-offline-game</h1>
@@ -12,9 +12,10 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/react-native-offline-game"><img src="https://img.shields.io/npm/v/react-native-offline-game?color=cb3837&logo=npm" alt="npm version" /></a>
-  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android-535353" alt="iOS and Android" />
+  <img src="https://img.shields.io/badge/platforms-iOS%20%7C%20Android%20%7C%20Web-535353" alt="iOS, Android and web" />
   <img src="https://img.shields.io/badge/Expo-ready-000020?logo=expo" alt="Works with Expo" />
-  <img src="https://img.shields.io/badge/size-6%20kB%20gzipped-2ea44f" alt="6 kB gzipped" />
+  <img src="https://img.shields.io/badge/size-9%20kB%20gzipped-2ea44f" alt="9 kB gzipped" />
+  <img src="https://img.shields.io/badge/dependencies-0-2ea44f" alt="No dependencies" />
   <img src="https://img.shields.io/badge/types-TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" />
 </p>
@@ -25,11 +26,15 @@
 
 - 🔌 **One line to add.** Drop `<OfflineGame />` into your app. It watches the connection for you.
 - 🧘 **Never flickers.** It waits a moment and double-checks before it appears, and ignores quick blips while you're reconnecting.
-- 🎮 **Plays like the real thing.** Tap to jump. The ground speeds up as you go, and the score blinks every 100 points.
-- 🔊 **Retro beeps.** Optional jump, crash and milestone sounds, made in code. No audio files.
+- 🎮 **Plays like the real thing.** Tap to jump (hold to jump higher), swipe down to duck under pterodactyls, clear rows of hurdles, and keep going when night falls every 700 points.
+- 🔁 **"Try again" button.** Checks the connection right away and closes the page if you're back.
+- 🏆 **Remembers the high score** between launches, with no setup.
+- 🧩 **Room for your own content** under the message, like a logo or "Your work is saved".
+- 🔊 **Retro beeps** and 📳 **vibration**, both optional. The beeps are made in code, with no audio files.
+- 🌐 **Works on the web too.** Click, Space or ↑ to jump, ↓ to duck.
 - 📴 **Works truly offline.** Everything it draws is built in. Nothing to download, even in a dev build in airplane mode.
 - 🌗 **Light and dark.** Follows the phone's theme automatically.
-- 🪶 **Tiny.** About **6 kB** gzipped in your app, artwork included.
+- 🪶 **Tiny, with zero dependencies.** About **9 kB** gzipped in your app, artwork included. Extras like AsyncStorage are used if your app already has them, never required.
 
 <p align="center">
   <img src="docs/screens.png" alt="The No internet page in light and dark mode" width="640" />
@@ -86,29 +91,60 @@ Connection comes back
 ```
 
 - A full-screen **"No internet"** page fades in over your app with the game ready to play.
-- **Tap anywhere** to start. Tap to jump over the hurdles.
-- When the internet is back, the page **closes on its own**, even mid-game.
+- When the internet is back, the page **closes on its own**, even mid-game. Or they can tap **Try again**.
+
+| | On a phone | On the web |
+| --- | --- | --- |
+| **Start / jump** | Tap anywhere | Click, Space or ↑ |
+| **Jump higher** | Keep your finger down | Hold the key |
+| **Duck** | Swipe down and hold | Hold ↓ |
+| **Drop fast** | Swipe down in mid-air | ↓ in mid-air |
+
+Pterodactyls show up once the game gets fast. Jump the low ones, duck under the middle ones, and don't jump into the high ones.
 
 It counts as offline when there's no network at all, **or** when there's a network that can't reach the internet (like hotel Wi-Fi before you log in).
 
 ## 🧩 Recipes
 
-### Remember the high score
+### The high score is saved for you
 
-The page remembers the best score while the app is open. To keep it forever, save it yourself, for example with AsyncStorage:
+The best score survives app restarts with nothing to set up:
+
+- **Your app has [AsyncStorage](https://github.com/react-native-async-storage/async-storage)?** It's saved there.
+- **On the web,** it's saved in the browser.
+- **Neither?** It's kept while the app is open.
+
+Using something else, like MMKV? Pass anything with `getItem` and `setItem`:
 
 ```tsx
-const [best, setBest] = useState(0);
-
-useEffect(() => {
-  AsyncStorage.getItem('dinoBest').then((v) => setBest(Number(v) || 0));
-}, []);
-
 <OfflineGame
-  highScore={best}
-  onHighScoreChange={(score) => AsyncStorage.setItem('dinoBest', String(score))}
-/>;
+  storage={{
+    getItem: (key) => mmkv.getString(key) ?? null,
+    setItem: (key, value) => mmkv.set(key, value),
+  }}
+/>
 ```
+
+Or turn it off with `rememberHighScore={false}`.
+
+### Add your own content
+
+Anything you put inside shows up under the message:
+
+```tsx
+<OfflineGame>
+  <Image source={logo} style={{ width: 96, height: 24 }} />
+  <Text>Don't worry, your work is saved.</Text>
+</OfflineGame>
+```
+
+### Vibrate on jumps and crashes 📳
+
+```tsx
+<OfflineGame vibration />
+```
+
+It uses React Native's built-in `Vibration`, so there's nothing to install. Android buzzes briefly on each jump and crash. iOS only allows one longer buzz without a native module, so on iOS it vibrates only on crashes. For subtler iOS haptics, use `onSound` with `expo-haptics`, as below.
 
 ### Turn on the sounds 🔊
 
@@ -139,6 +175,7 @@ Prefer your own sounds or a little vibration? Turn the beeps off and react to ea
 <OfflineGame
   title="You're offline"
   message="Your changes are saved. Have a quick game while we reconnect."
+  retryLabel="Reconnect" // or showRetry={false} to hide the button
   colorScheme="dark" // or 'light', or 'auto' (the default)
 />
 ```
@@ -186,6 +223,10 @@ The full-screen page. Render it once, and it shows up by itself when needed.
 | `hideDelay` | `number` | `1000` | Milliseconds the connection must stay back before the page closes. |
 | `title` | `string` | `"No internet"` | The heading under the game. |
 | `message` | `string` | `"Check your connection…"` | The text under the heading. |
+| `showRetry` | `boolean` | `true` | Show the **Try again** button. |
+| `retryLabel` | `string` | `"Try again"` | The button's text. |
+| `onRetry` | `() => void` | | The button was pressed. With `isOffline`, re-check your own way here. |
+| `children` | `ReactNode` | | Your own content under the message. |
 | `dismissible` | `boolean` | `false` | Let Android's back button close the page until the next drop. |
 | `onShow` | `() => void` | | The page opened. |
 | `onReconnect` | `() => void` | | The page closed because the internet is back. |
@@ -194,20 +235,24 @@ It also takes all the `<DinoGame />` props below.
 
 ### `<DinoGame />`
 
-The game on its own: 120 points tall, as wide as its container. Tap it to start, jump and restart. It pauses when the app goes to the background.
+The game on its own: 120 points tall, as wide as its container. It has the same controls, and pauses when the app goes to the background. On the web, the keyboard only drives it once it has been started, so it doesn't take over the Space key on your page.
 
 | Prop | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `highScore` | `number` | `0` | Best score to show at the start. |
 | `onHighScoreChange` | `(score) => void` | | A run beat the best score. |
-| `onGameOver` | `(score) => void` | | The dinosaur hit a hurdle. |
+| `onGameOver` | `(score) => void` | | The dinosaur hit something. |
+| `rememberHighScore` | `boolean` | `true` | Save the best score between launches. |
+| `storage` | `{ getItem, setItem }` | *AsyncStorage or the browser* | Where to save it. |
 | `sounds` | `boolean` | `true` | Beep on jumps, crashes and every 100 points (needs `react-native-audio-api`). |
 | `onSound` | `('jump' \| 'hit' \| 'score') => void` | | Each of those moments, for your own sounds or haptics. |
+| `vibration` | `boolean` | `false` | Buzz on jumps and crashes (crashes only on iOS). |
 | `colorScheme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | `'auto'` follows the phone's theme. |
+| `onNightChange` | `(night) => void` | | Night started or ended. |
 | `options` | `{ fps?, skySpeed?, groundSpeed? }` | `{ fps: 60, skySpeed: 40, groundSpeed: 360 }` | Frame rate cap, cloud speed and starting ground speed (points per second). |
 | `style` | `ViewStyle` | | Style for the game's box. |
 
-Give it a `ref` to control it from code: `ref.current.tap()` and `ref.current.pause()`.
+Give it a `ref` to control it from code: `tap()`, `release()`, `duck(down)` and `pause()`.
 
 ### `useIsOffline()`
 
@@ -234,6 +279,13 @@ Yes, everything except the sounds, which need a development build. See [Turn on 
 </details>
 
 <details>
+<summary><b>Does it work on the web?</b></summary>
+
+Yes, with React Native Web (for example `npx expo start --web`). Click, Space or ↑ jumps, and ↓ ducks. The high score is saved in the browser.
+
+</details>
+
+<details>
 <summary><b>Dark mode isn't kicking in (Expo)</b></summary>
 
 New Expo apps lock themselves to light mode. Set `"userInterfaceStyle": "automatic"` in `app.json`, or pass `colorScheme="dark"`.
@@ -250,7 +302,7 @@ On Android, set `dismissible` and the back button closes it until the next time 
 <details>
 <summary><b>How big is it, really?</b></summary>
 
-About 6 kB gzipped (13 kB minified) in your app's JavaScript, including all the artwork, which is one built-in image under 1 kB. The npm download is 19 kB. Sounds add nothing; they're generated in code.
+About 9 kB gzipped (20 kB minified) in your app's JavaScript, including all the artwork, which is one built-in image of 1.2 kB. The npm download is 28 kB. It has no dependencies of its own: sounds are generated in code, and vibration and storage use what React Native and your app already have.
 
 </details>
 

@@ -1,20 +1,27 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   AIR_TIME,
+  BIRD_Y,
   MAX_SPEED,
-  OBSTACLE_WIDTH,
   PLAYER_X,
   createGame,
   currentSpeed,
+  duck,
+  isDucking,
+  isNight,
+  nextObstacle,
+  obstacleWidth,
   obstacleX,
   pause,
   playerPose,
+  release,
   seedClouds,
   shownScore,
   step,
   tap,
   type GameOptions,
   type GameState,
+  type Obstacle,
 } from '../engine';
 
 const OPTIONS: GameOptions = { skySpeed: 40, groundSpeed: 360 };
@@ -45,17 +52,58 @@ function run(
   }
 }
 
-/** Jumps when the next hurdle is about to reach the dinosaur. */
+/**
+ * Plays like a careful human holding the button for full jumps: jumps
+ * hurdles and low birds just before they arrive, ducks under middle birds
+ * and ignores high ones.
+ */
 function autoJump(game: GameState, options: GameOptions, width = WIDTH) {
   return () => {
     const speed = currentSpeed(game, width);
     const next = game.obstacles
-      .map((o) => obstacleX(game, o, width))
-      .find((x) => x + OBSTACLE_WIDTH > PLAYER_X + 10);
-    if (next !== undefined && next - (PLAYER_X + 34) <= speed * 0.15) {
-      tap(game, options);
+      .map((o) => ({ o, x: obstacleX(game, o, width) }))
+      .find(({ o, x }) => x + obstacleWidth(o) > PLAYER_X + 4);
+    if (next === undefined) {
+      return;
     }
+    const arrivesIn = (next.x - (PLAYER_X + 34)) / speed;
+    if (next.o.kind === 'bird' && next.o.y === BIRD_Y.high) {
+      return;
+    }
+    if (next.o.kind === 'bird' && next.o.y === BIRD_Y.middle) {
+      if (arrivesIn <= 0.2) duck(game, true);
+      return;
+    }
+    if (game.ducking) duck(game, false);
+    if (arrivesIn <= 0.15) tap(game, options);
   };
+}
+
+type ObstacleShape =
+  | { kind: 'hurdle'; count: 1 | 2 | 3 }
+  | { kind: 'bird'; y: number };
+
+/** Puts one obstacle right in front of a running dinosaur. */
+function facing(obstacle: ObstacleShape, ahead = 60) {
+  const game = createGame();
+  tap(game, OPTIONS);
+  game.jumpHeight = 0;
+  game.jumpVelocity = 0;
+  game.distance = 1000;
+  game.obstacles = [
+    { ...obstacle, distance: 1000 - WIDTH + PLAYER_X + ahead } as Obstacle,
+    { kind: 'hurdle', count: 1, distance: 1e9 },
+  ];
+  return game;
+}
+
+/** Runs until the obstacle has passed the dinosaur, or it crashes. */
+function pass(game: GameState, beforeStep?: () => void) {
+  for (let i = 0; i < 90 && game.status === 'running'; i++) {
+    beforeStep?.();
+    step(game, FRAME, WIDTH, OPTIONS, seeded(1));
+  }
+  return game.status;
 }
 
 describe('engine', () => {
@@ -259,5 +307,138 @@ describe('engine', () => {
     expect(game.clouds.length).toBeGreaterThan(0);
     expect(game.clouds.length).toBeLessThan(10);
     expect(game.clouds.some((c) => c.x < WIDTH)).toBe(true);
+  });
+
+  describe('hold to jump higher', () => {
+    const peak = (holdFor: number) => {
+      const game = createGame();
+      tap(game, OPTIONS);
+      let best = 0;
+      for (let t = 0; t < 1; t += FRAME) {
+        if (t >= holdFor) release(game);
+        step(game, FRAME, WIDTH, OPTIONS);
+        best = Math.max(best, game.jumpHeight);
+      }
+      return best;
+    };
+
+    it('jumps lower when let go straight away, full height when held', () => {
+      expect(peak(0)).toBeGreaterThan(30);
+      expect(peak(0)).toBeLessThan(40);
+      expect(peak(1)).toBeGreaterThan(60);
+    });
+
+    it('still clears a single hurdle with a quick tap', () => {
+      const game = facing({ kind: 'hurdle', count: 1 }, 80);
+      tap(game, OPTIONS);
+      release(game);
+      expect(pass(game)).toBe('running');
+    });
+  });
+
+  describe('ducking', () => {
+    it('crouches on the ground and can not jump while crouched', () => {
+      const game = facing({ kind: 'hurdle', count: 1 }, 400);
+      duck(game, true);
+      expect(isDucking(game)).toBe(true);
+      expect(playerPose(game)).toMatch(/^duck/);
+      expect(tap(game, OPTIONS)).toBeUndefined();
+      duck(game, false);
+      expect(isDucking(game)).toBe(false);
+    });
+
+    it('drops fast when pressed in mid-air', () => {
+      const fall = (drop: boolean) => {
+        const game = createGame();
+        tap(game, OPTIONS);
+        let t = 0;
+        for (; t < 0.25; t += FRAME) step(game, FRAME, WIDTH, OPTIONS);
+        if (drop) duck(game, true);
+        for (; game.jumpHeight > 0; t += FRAME) step(game, FRAME, WIDTH, OPTIONS);
+        return t;
+      };
+      expect(fall(true)).toBeLessThan(fall(false) - 0.1);
+    });
+
+    it('cancels a jump the same swipe started', () => {
+      const game = createGame();
+      tap(game, OPTIONS);
+      step(game, 0.05, WIDTH, OPTIONS);
+      expect(game.jumpHeight).toBeGreaterThan(0);
+      duck(game, true, true);
+      expect(game.jumpHeight).toBe(0);
+      expect(isDucking(game)).toBe(true);
+    });
+  });
+
+  describe('birds', () => {
+    it('a middle bird hits a standing dinosaur but not a ducking one', () => {
+      expect(pass(facing({ kind: 'bird', y: BIRD_Y.middle }))).toBe('over');
+      const game = facing({ kind: 'bird', y: BIRD_Y.middle });
+      duck(game, true);
+      expect(pass(game)).toBe('running');
+    });
+
+    it('a low bird hits a ducking dinosaur and has to be jumped', () => {
+      const ducking = facing({ kind: 'bird', y: BIRD_Y.low });
+      duck(ducking, true);
+      expect(pass(ducking)).toBe('over');
+      const jumping = facing({ kind: 'bird', y: BIRD_Y.low }, 80);
+      tap(jumping, OPTIONS);
+      expect(pass(jumping)).toBe('running');
+    });
+
+    it('a high bird flies over a running dinosaur but catches a jumping one', () => {
+      expect(pass(facing({ kind: 'bird', y: BIRD_Y.high }))).toBe('running');
+      const game = facing({ kind: 'bird', y: BIRD_Y.high }, 40);
+      tap(game, OPTIONS);
+      expect(pass(game)).toBe('over');
+    });
+
+    it('only show up once the game is fast, at all three heights', () => {
+      const previous: Obstacle = { kind: 'hurdle', count: 1, distance: 0 };
+      const random = seeded(9);
+      const slow = Array.from({ length: 200 }, () =>
+        nextObstacle(previous, 300, 400, random)
+      );
+      expect(slow.some((o) => o.kind === 'bird')).toBe(false);
+      const fast = Array.from({ length: 400 }, () =>
+        nextObstacle(previous, 500, 600, random)
+      );
+      const heights = new Set(
+        fast.flatMap((o) => (o.kind === 'bird' ? [o.y] : []))
+      );
+      expect([...heights].sort()).toEqual(
+        [BIRD_Y.low, BIRD_Y.middle, BIRD_Y.high].sort()
+      );
+    });
+  });
+
+  it('sends hurdles in pairs and threes as the game speeds up', () => {
+    const previous: Obstacle = { kind: 'hurdle', count: 1, distance: 0 };
+    const sizes = (speed: number) => {
+      const random = seeded(4);
+      return new Set(
+        Array.from({ length: 200 }, () =>
+          nextObstacle(previous, speed, 360, random)
+        ).map((o) => (o.kind === 'hurdle' ? o.count : 0))
+      );
+    };
+    expect([...sizes(200)]).toEqual([1]);
+    expect([...sizes(300)].sort()).toEqual([1, 2]);
+    expect([...sizes(500)].sort()).toEqual([1, 2, 3]);
+  });
+
+  it('turns night for 12 seconds every 700 points', () => {
+    const game = createGame();
+    tap(game, OPTIONS);
+    game.obstacles = [{ kind: 'hurdle', count: 1, distance: 1e9 }];
+    game.score = 699.9;
+    step(game, FRAME, WIDTH, OPTIONS);
+    expect(isNight(game)).toBe(true);
+    for (let t = 0; t < 11.9; t += 0.1) step(game, 0.1, WIDTH, OPTIONS);
+    expect(isNight(game)).toBe(true);
+    step(game, 0.2, WIDTH, OPTIONS);
+    expect(isNight(game)).toBe(false);
   });
 });

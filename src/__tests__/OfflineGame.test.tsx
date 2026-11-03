@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
+import { Text } from 'react-native';
 import { OfflineGame } from '../OfflineGame';
 
 type MockState = {
@@ -249,7 +250,11 @@ describe('OfflineGame', () => {
     expect(screen.getByText('Tap to play')).toBeTruthy();
 
     // A tap anywhere on the page plays, not just on the game strip.
-    await act(() => fireEvent(screen.getByText('No internet'), 'touchStart'));
+    await act(() =>
+      fireEvent(screen.getByTestId('offline-game-tap-area'), 'touchStart', {
+        nativeEvent: { pageY: 300, touches: [{}] },
+      })
+    );
     expect(screen.queryByText('Tap to play')).toBeNull();
     expect(onSound).toHaveBeenCalledWith('jump');
     await wait(1000);
@@ -258,5 +263,71 @@ describe('OfflineGame', () => {
     expect(screen.queryByText(/ 00000$/)).toBeNull();
     await view.unmount();
     jest.mocked(console.error).mockRestore();
+  });
+
+  it('Try again closes the page at once when the connection is back', async () => {
+    const onReconnect = jest.fn();
+    mockNetInfo = OFFLINE;
+    await render(<OfflineGame {...DELAYS} onReconnect={onReconnect} />);
+    await waitFor(() => expect(isShown()).toBe(true));
+
+    mockRefresh = ONLINE;
+    await act(() => fireEvent.press(screen.getByText('Try again')));
+    await waitFor(() => expect(isShown()).toBe(false));
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('Try again says so when still offline', async () => {
+    mockNetInfo = OFFLINE;
+    await render(<OfflineGame {...DELAYS} retryLabel="Retry" />);
+    await waitFor(() => expect(isShown()).toBe(true));
+
+    await act(() => fireEvent.press(screen.getByText('Retry')));
+    await waitFor(() => expect(screen.getByText('Still offline')).toBeTruthy());
+    expect(isShown()).toBe(true);
+  });
+
+  it('with isOffline, Try again just tells the app', async () => {
+    const onRetry = jest.fn();
+    await render(
+      <OfflineGame {...DELAYS} isOffline onRetry={onRetry} />
+    );
+    await waitFor(() => expect(isShown()).toBe(true));
+    await act(() => fireEvent.press(screen.getByText('Try again')));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(NetInfo.refresh).not.toHaveBeenCalled();
+    expect(isShown()).toBe(true);
+  });
+
+  it('shows your own content and can hide the button', async () => {
+    await render(
+      <OfflineGame {...DELAYS} isOffline showRetry={false}>
+        <Text>Your work is saved</Text>
+      </OfflineGame>
+    );
+    await waitFor(() => expect(isShown()).toBe(true));
+    expect(screen.getByText('Your work is saved')).toBeTruthy();
+    expect(screen.queryByText('Try again')).toBeNull();
+  });
+
+  it('brings back the high score saved earlier', async () => {
+    const storage = {
+      getItem: jest.fn(async () => '1234'),
+      setItem: jest.fn(async () => {}),
+    };
+    const view = await render(
+      <OfflineGame {...DELAYS} isOffline storage={storage} />
+    );
+    await waitFor(() => expect(isShown()).toBe(true));
+    await act(() =>
+      fireEvent(screen.getByLabelText('Dinosaur game'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 120 } },
+      })
+    );
+    await waitFor(() => expect(screen.getByText(/^HI 01234/)).toBeTruthy());
+    expect(storage.getItem).toHaveBeenCalledWith(
+      'react-native-offline-game:high-score'
+    );
+    await view.unmount();
   });
 });

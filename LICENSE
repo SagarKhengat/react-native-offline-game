@@ -43,8 +43,9 @@ react-dinosaur-game (https://github.com/LzxHahaha/react-dinosaur-game):
   OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
   CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-The game and its artwork are modelled on the T-Rex game in the Chromium
-project (https://www.chromium.org):
+The game is modelled on the T-Rex game in the Chromium project
+(https://www.chromium.org), and the pterodactyl and ducking-dinosaur sprites
+(assets/bird-*.png, assets/dino-duck-*.png) are taken from its sprite sheet:
 
   Copyright 2015 The Chromium Authors
 

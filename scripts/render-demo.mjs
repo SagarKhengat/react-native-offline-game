@@ -1,5 +1,6 @@
 // Renders docs/demo.gif from the real game engine and sprite sheet: an
-// auto-jumping run that clears hurdles, then crashes. Needs the built
+// auto-played run that jumps hurdles, ducks under birds, then crashes. It
+// starts at the speed where birds appear, so they show up in a short clip. Needs the built
 // library (npm run prepare) and ffmpeg on the PATH.
 // Run with: node scripts/render-demo.mjs
 import { execFileSync } from 'node:child_process';
@@ -16,7 +17,7 @@ const WIDTH = 600;
 const HEIGHT = engine.SCENE_HEIGHT;
 const SCALE = 2;
 const FPS = 15;
-const RUN_SECONDS = 9;
+const RUN_SECONDS = 10;
 const HOLD_SECONDS = 1.6;
 const TEXT = [83, 83, 83];
 
@@ -107,10 +108,30 @@ function frame(game) {
   }
   for (const obstacle of game.obstacles) {
     const x = engine.obstacleX(game, obstacle, WIDTH);
-    if (x < WIDTH) sprite('obstacle', x, engine.OBSTACLE_Y);
+    if (x >= WIDTH) continue;
+    if (obstacle.kind === 'bird') {
+      sprite(engine.birdFrame(game) === 0 ? 'bird1' : 'bird2', x, obstacle.y);
+    } else {
+      for (let i = 0; i < obstacle.count; i++) {
+        sprite('obstacle', x + i * engine.OBSTACLE_WIDTH, engine.OBSTACLE_Y);
+      }
+    }
   }
-  const poses = { stand: 'dino', left: 'dinoLeft', right: 'dinoRight', dead: 'dinoDead' };
-  sprite(poses[engine.playerPose(game)], engine.PLAYER_X, engine.PLAYER_Y - game.jumpHeight);
+  const poses = {
+    stand: 'dino',
+    left: 'dinoLeft',
+    right: 'dinoRight',
+    duckLeft: 'dinoDuck1',
+    duckRight: 'dinoDuck2',
+    dead: 'dinoDead',
+  };
+  const pose = engine.playerPose(game);
+  const ducked = pose.startsWith('duck');
+  sprite(
+    poses[pose],
+    engine.PLAYER_X,
+    ducked ? engine.FEET_Y - engine.DUCK_HEIGHT : engine.PLAYER_Y - game.jumpHeight
+  );
 
   const pad = (n) => String(n).padStart(5, '0');
   const shown = engine.shownScore(game);
@@ -123,29 +144,40 @@ function frame(game) {
   return PNG.sync.write(out);
 }
 
-const options = { skySpeed: 40, groundSpeed: 360 };
-const random = seeded(7);
+const options = { skySpeed: 40, groundSpeed: 520 };
+const random = seeded(Number(process.env.SEED ?? 8));
 const game = engine.createGame(412);
 engine.seedClouds(game, WIDTH, random);
 engine.tap(game, options);
 
 const dir = mkdtempSync(join(tmpdir(), 'dino-demo-'));
+const seen = new Map();
 let n = 0;
 const dt = 1 / FPS;
 const substeps = 4;
 for (let t = 0; t < RUN_SECONDS && game.status === 'running'; t += dt) {
   for (let s = 0; s < substeps && game.status === 'running'; s++) {
-    // Jump just before each hurdle, until the last second or so.
+    // Jump hurdles and low birds, duck under middle birds, ignore high
+    // ones, until the last second or so.
     const speed = engine.currentSpeed(game, WIDTH);
     const next = game.obstacles
-      .map((o) => engine.obstacleX(game, o, WIDTH))
-      .find((x) => x + engine.OBSTACLE_WIDTH > engine.PLAYER_X + 10);
+      .map((o) => ({ o, x: engine.obstacleX(game, o, WIDTH) }))
+      .find(({ o, x }) => x + engine.obstacleWidth(o) > engine.PLAYER_X + 4);
     const reacting = t < RUN_SECONDS - 1.2;
-    if (reacting && next !== undefined && next - (engine.PLAYER_X + 34) <= speed * 0.12) {
-      engine.tap(game, options);
+    if (reacting && next !== undefined) {
+      const arrivesIn = (next.x - (engine.PLAYER_X + 34)) / speed;
+      if (next.o.kind === 'bird' && next.o.y === engine.BIRD_Y.middle) {
+        if (arrivesIn <= 0.2) engine.duck(game, true);
+      } else if (!(next.o.kind === 'bird' && next.o.y === engine.BIRD_Y.high)) {
+        if (game.ducking) engine.duck(game, false);
+        if (arrivesIn <= 0.12) engine.tap(game, options);
+      }
+    } else if (game.ducking) {
+      engine.duck(game, false);
     }
     engine.step(game, dt / substeps, WIDTH, options, random);
   }
+  for (const o of game.obstacles) seen.set(o.distance, o);
   writeFileSync(join(dir, `f${String(n++).padStart(4, '0')}.png`), frame(game));
 }
 for (let i = 0; i < HOLD_SECONDS * FPS; i++) {
@@ -160,4 +192,8 @@ execFileSync('ffmpeg', [
   '-loop', '0', gif,
 ]);
 rmSync(dir, { recursive: true });
+const kinds = [...seen.values()].map((o) =>
+  o.kind === 'bird' ? `bird@${o.y}` : `hurdle x${o.count}`
+);
 console.log(`${gif}: ${n} frames, run ended ${game.status}, score ${Math.floor(game.score)}`);
+console.log(`obstacles: ${kinds.join(', ')}`);
