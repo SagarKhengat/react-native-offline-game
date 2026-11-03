@@ -8,4 +8,5 @@ export type {
   DinoGameProps,
 } from './DinoGame';
 export type { GameSound } from './engine';
+export type { HighScoreStorage } from './storage';
 export { useIsOffline } from './useIsOffline';

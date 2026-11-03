@@ -2,7 +2,7 @@ import NetInfo, {
   type NetInfoState,
   type NetInfoSubscription,
 } from '@react-native-community/netinfo';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { connectionStatus, useConnectionStatus } from './useIsOffline';
 
 // How long to wait for NetInfo's second opinion before trusting the first.
@@ -22,6 +22,7 @@ export type OfflineScreenOptions = {
  * buffer in both directions so it doesn't flicker: it turns on once the
  * connection has been down for `showDelay` and a fresh NetInfo check agrees,
  * and turns off once the connection has been back for `hideDelay`.
+ * `retry` checks right away and closes the screen at once if it's back.
  */
 export function useOfflineScreen({
   isOffline,
@@ -29,7 +30,10 @@ export function useOfflineScreen({
   hideDelay,
   onShow,
   onReconnect,
-}: OfflineScreenOptions): boolean {
+}: OfflineScreenOptions): {
+  visible: boolean;
+  retry: () => Promise<boolean>;
+} {
   const detected = useConnectionStatus();
   const manual = isOffline !== undefined;
   const status = manual ? (isOffline ? 'offline' : 'online') : detected;
@@ -54,6 +58,17 @@ export function useOfflineScreen({
     latest.current = { onShow, onReconnect };
   });
 
+  const close = useCallback(() => {
+    if (!visibleRef.current) {
+      return;
+    }
+    visibleRef.current = false;
+    setVisible(false);
+    // Closing on an unknown reading means it's no longer offline.
+    setLastKnown(false);
+    latest.current.onReconnect?.();
+  }, []);
+
   useEffect(() => {
     if (offline === visibleRef.current) {
       return undefined;
@@ -72,14 +87,12 @@ export function useOfflineScreen({
         if (cancelled) {
           return;
         }
-        visibleRef.current = offline;
-        setVisible(offline);
         if (offline) {
+          visibleRef.current = true;
+          setVisible(true);
           latest.current.onShow?.();
         } else {
-          // Closing on an unknown reading means it's no longer offline.
-          setLastKnown(false);
-          latest.current.onReconnect?.();
+          close();
         }
       },
       offline ? showDelay : hideDelay
@@ -88,9 +101,20 @@ export function useOfflineScreen({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [offline, manual, showDelay, hideDelay, retries]);
+  }, [offline, manual, showDelay, hideDelay, retries, close]);
 
-  return visible;
+  const retry = useCallback(async () => {
+    if (manual) {
+      return false;
+    }
+    const online = !(await confirmOffline());
+    if (online) {
+      close();
+    }
+    return online;
+  }, [manual, close]);
+
+  return { visible, retry };
 }
 
 /**

@@ -1,8 +1,11 @@
 import {
+  createContext,
   forwardRef,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -19,7 +22,10 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { useGameControls } from './controls';
 import {
+  DUCK_HEIGHT,
+  FEET_Y,
   GROUND_TILE_WIDTH,
   GROUND_Y,
   OBSTACLE_WIDTH,
@@ -27,10 +33,15 @@ import {
   PLAYER_X,
   PLAYER_Y,
   SCENE_HEIGHT,
+  birdFrame,
   createGame,
+  duck,
+  isNight,
+  obstacleWidth,
   obstacleX,
   pause,
   playerPose,
+  release,
   seedClouds,
   shownScore,
   step,
@@ -41,11 +52,20 @@ import {
 } from './engine';
 import { playSound, retainSounds } from './sounds';
 import { FRAMES, SHEET, type FrameName } from './sprites';
+import {
+  defaultStorage,
+  loadHighScore,
+  saveHighScore,
+  type HighScoreStorage,
+} from './storage';
+import { vibrate } from './vibration';
 
 const POSE_FRAMES: Record<PlayerPose, FrameName> = {
   stand: 'dino',
   left: 'dinoLeft',
   right: 'dinoRight',
+  duckLeft: 'dinoDuck1',
+  duckRight: 'dinoDuck2',
   dead: 'dinoDead',
 };
 
@@ -54,7 +74,7 @@ const POSE_FRAMES: Record<PlayerPose, FrameName> = {
 const MAX_STEP = 1 / 20;
 // Taps this soon after a crash are ignored so a late jump doesn't restart.
 const RESTART_DELAY_MS = 400;
-// Hurdles mount this far off screen so their image is ready when they
+// Obstacles mount this far off screen so their image is ready when they
 // scroll in.
 const PRELOAD_DISTANCE = 60;
 
@@ -75,6 +95,12 @@ export const COLORS = {
 
 export type ColorSchemeName = 'light' | 'dark' | 'auto';
 
+/**
+ * Set by OfflineGame, which handles input for the whole page itself, so the
+ * game doesn't also listen.
+ */
+export const PageControlsContext = createContext(false);
+
 export type DinoGameOptions = {
   /** Maximum frames per second. Default 60. */
   fps?: number;
@@ -92,10 +118,17 @@ export type DinoGameProps = {
   options?: DinoGameOptions;
   /** High score to show from the start, for example one you saved earlier. */
   highScore?: number;
-  /** Called when the dinosaur hits a hurdle. */
+  /** Called when the dinosaur hits something. */
   onGameOver?: (score: number) => void;
   /** Called with the new best score when a run beats it. */
   onHighScoreChange?: (highScore: number) => void;
+  /**
+   * Keep the best score between launches. Uses AsyncStorage when the app
+   * has it, localStorage on the web, or `storage`. Default true.
+   */
+  rememberHighScore?: boolean;
+  /** Where to keep the best score instead, e.g. an MMKV wrapper. */
+  storage?: HighScoreStorage;
   /**
    * Beeps on jumps, crashes and every 100 points. They need
    * react-native-audio-api in the app; without it the game is silent.
@@ -107,18 +140,30 @@ export type DinoGameProps = {
    * playing your own audio or haptics.
    */
   onSound?: (sound: GameSound) => void;
+  /**
+   * Buzz on jumps and crashes (on iOS only crashes, the only vibration iOS
+   * offers without a native module). Default false.
+   */
+  vibration?: boolean;
   /** Default 'auto', which follows the device setting. */
   colorScheme?: ColorSchemeName;
+  /** Called when the game turns night (every 700 points) and back. */
+  onNightChange?: (night: boolean) => void;
   style?: StyleProp<ViewStyle>;
 };
 
 export type DinoGameHandle = {
   /** Same as tapping the game: start, jump, resume or restart. */
   tap: () => void;
+  /** Same as lifting the finger: ends a jump early for a lower hop. */
+  release: () => void;
+  /** Duck while `down` is true. */
+  duck: (down: boolean, cancelTakeoff?: boolean) => void;
   pause: () => void;
 };
 
 const DEFAULT_OPTIONS = { fps: 60, skySpeed: 40, groundSpeed: 360 };
+const WEB = Platform.OS === 'web';
 
 export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
   function DinoGame(
@@ -127,9 +172,13 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       highScore = 0,
       onGameOver,
       onHighScoreChange,
+      rememberHighScore = true,
+      storage,
       sounds = true,
       onSound,
+      vibration = false,
       colorScheme = 'auto',
+      onNightChange,
       style,
     },
     ref
@@ -142,6 +191,7 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
     const widthRef = useRef(0);
     const overAtRef = useRef(0);
     const reportedHighScoreRef = useRef(Math.floor(highScore));
+    const pageControls = useContext(PageControlsContext);
 
     const latest = useRef({
       options,
@@ -149,10 +199,24 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       onHighScoreChange,
       sounds,
       onSound,
+      vibration,
+      onNightChange,
     });
     useEffect(() => {
-      latest.current = { options, onGameOver, onHighScoreChange, sounds, onSound };
+      latest.current = {
+        options,
+        onGameOver,
+        onHighScoreChange,
+        sounds,
+        onSound,
+        vibration,
+        onNightChange,
+      };
     });
+
+    const store = rememberHighScore ? storage ?? defaultStorage() : null;
+    const storeRef = useRef(store);
+    storeRef.current = store;
 
     const gameOptions = useCallback((): Required<DinoGameOptions> => {
       const { fps, skySpeed, groundSpeed } = latest.current.options ?? {};
@@ -166,18 +230,43 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
     const emit = useCallback((sound: GameSound | undefined) => {
       if (sound) {
         latest.current.onSound?.(sound);
-        if (latest.current.sounds) {
-          playSound(sound);
-        }
+        if (latest.current.sounds) playSound(sound);
+        if (latest.current.vibration) vibrate(sound);
       }
     }, []);
 
     useEffect(() => (sounds ? retainSounds() : undefined), [sounds]);
 
+    // Bring back the best score from an earlier launch. Once, on mount: the
+    // game re-renders every frame, and `storage` may be a new object each
+    // time.
+    useEffect(() => {
+      const saved = storeRef.current;
+      if (!saved) {
+        return undefined;
+      }
+      let cancelled = false;
+      loadHighScore(saved).then((saved) => {
+        const g = gameRef.current;
+        if (!cancelled && saved > g.highScore) {
+          g.highScore = saved;
+          reportedHighScoreRef.current = Math.max(
+            reportedHighScoreRef.current,
+            saved
+          );
+          redraw();
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [rememberHighScore]);
+
     const reportHighScore = useCallback(() => {
       const best = Math.floor(gameRef.current.highScore);
       if (best > reportedHighScoreRef.current) {
         reportedHighScoreRef.current = best;
+        if (storeRef.current) saveHighScore(storeRef.current, best);
         latest.current.onHighScoreChange?.(best);
       }
     }, []);
@@ -204,15 +293,41 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       redraw();
     }, [emit, gameOptions]);
 
+    const handleRelease = useCallback(() => {
+      release(gameRef.current);
+    }, []);
+
+    const handleDuck = useCallback((down: boolean, cancelTakeoff = false) => {
+      duck(gameRef.current, down, cancelTakeoff);
+      redraw();
+    }, []);
+
     const handlePause = useCallback(() => {
       pause(gameRef.current);
       setStatus(gameRef.current.status);
     }, []);
 
-    useImperativeHandle(ref, () => ({ tap: handleTap, pause: handlePause }), [
-      handleTap,
-      handlePause,
-    ]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        tap: handleTap,
+        release: handleRelease,
+        duck: handleDuck,
+        pause: handlePause,
+      }),
+      [handleTap, handleRelease, handleDuck, handlePause]
+    );
+
+    const controls = useMemo(
+      () => ({ press: handleTap, release: handleRelease, duck: handleDuck }),
+      [handleTap, handleRelease, handleDuck]
+    );
+    // On its own on a web page, the keyboard only drives the game once it
+    // has been started, so it doesn't take over Space before then.
+    const input = useGameControls(
+      controls,
+      !pageControls && status !== 'idle'
+    );
 
     useEffect(() => {
       const subscription = AppState.addEventListener('change', (state) => {
@@ -264,13 +379,24 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
       setWidth(layoutWidth);
     }, []);
 
+    const night = isNight(game);
+    const nightRef = useRef(night);
+    useEffect(() => {
+      if (night !== nightRef.current) {
+        nightRef.current = night;
+        latest.current.onNightChange?.(night);
+      }
+    }, [night]);
+
     const systemScheme = useColorScheme();
-    const scheme =
+    const base =
       colorScheme === 'auto'
         ? systemScheme === 'dark'
           ? 'dark'
           : 'light'
         : colorScheme;
+    // Night swaps the colours, like Chrome's game.
+    const scheme = night ? (base === 'dark' ? 'light' : 'dark') : base;
     const colors = COLORS[scheme];
 
     const shown = shownScore(game);
@@ -278,12 +404,13 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
     const scoreText =
       (best > 0 ? `HI ${pad(best)}  ` : '') +
       (status === 'idle' ? '' : shown === null ? '     ' : pad(shown));
+    const pose = playerPose(game);
+    const ducked = pose === 'duckLeft' || pose === 'duckRight';
 
     return (
-      // onTouchStart rather than Pressable: it fires the moment a finger lands
-      // and for every finger, so quick taps with two thumbs all count.
       <View
-        onTouchStart={handleTap}
+        ref={pageControls ? undefined : input.ref}
+        {...(pageControls ? {} : input.handlers)}
         onLayout={onLayout}
         accessible
         accessibilityRole="button"
@@ -294,6 +421,9 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
         style={[
           styles.container,
           { backgroundColor: colors.background },
+          // On the offline page the browser focuses the game so Space works
+          // straight away; the focus ring around it would just be noise.
+          pageControls && WEB && WEB_NO_OUTLINE,
           style,
         ]}
       >
@@ -319,22 +449,36 @@ export const DinoGame = forwardRef<DinoGameHandle, DinoGameProps>(
                 />
               )
             )}
-            {game.obstacles.map((obstacle) => {
+            {game.obstacles.flatMap((obstacle) => {
               const x = obstacleX(game, obstacle, width);
-              return x < width + PRELOAD_DISTANCE && x + OBSTACLE_WIDTH > 0 ? (
+              if (x >= width + PRELOAD_DISTANCE || x + obstacleWidth(obstacle) <= 0) {
+                return [];
+              }
+              if (obstacle.kind === 'bird') {
+                return [
+                  <Sprite
+                    key={obstacle.distance}
+                    frame={birdFrame(game) === 0 ? 'bird1' : 'bird2'}
+                    left={x}
+                    top={obstacle.y}
+                    tint={colors.sprite}
+                  />,
+                ];
+              }
+              return Array.from({ length: obstacle.count }, (_, i) => (
                 <Sprite
-                  key={obstacle}
+                  key={`${obstacle.distance}-${i}`}
                   frame="obstacle"
-                  left={x}
+                  left={x + i * OBSTACLE_WIDTH}
                   top={OBSTACLE_Y}
                   tint={colors.sprite}
                 />
-              ) : null;
+              ));
             })}
             <Sprite
-              frame={POSE_FRAMES[playerPose(game)]}
+              frame={POSE_FRAMES[pose]}
               left={PLAYER_X}
-              top={PLAYER_Y - game.jumpHeight}
+              top={ducked ? FEET_Y - DUCK_HEIGHT : PLAYER_Y - game.jumpHeight}
               tint={colors.sprite}
             />
             <Text style={[styles.score, { color: colors.text }]}>
@@ -382,18 +526,15 @@ function Sprite({
         source={SHEET}
         resizeMode="stretch"
         fadeDuration={0}
-        style={[
-          styles.sheet,
-          { left: -x, top: -y, tintColor: tint },
-        ]}
+        style={[styles.sheet, { left: -x, top: -y, tintColor: tint }]}
       />
     </View>
   );
 }
 
 const MESSAGES: Record<Exclude<GameStatus, 'running'>, string> = {
-  idle: 'Tap to play',
-  paused: 'Tap to continue',
+  idle: WEB ? 'Press Space or click to play' : 'Tap to play',
+  paused: WEB ? 'Click to continue' : 'Tap to continue',
   over: 'GAME OVER',
 };
 
@@ -409,6 +550,10 @@ function tileOffsets(width: number, tileWidth: number, offset: number) {
   }
   return offsets;
 }
+
+// Web only, where 'none' (missing from React Native's types) is passed
+// through to CSS. Chrome draws an 'auto' focus ring even at width 0.
+const WEB_NO_OUTLINE = { outlineStyle: 'none' } as unknown as ViewStyle;
 
 const MONOSPACE = Platform.select({
   ios: 'Menlo',
